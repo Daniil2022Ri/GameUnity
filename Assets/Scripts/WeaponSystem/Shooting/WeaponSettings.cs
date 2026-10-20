@@ -88,6 +88,17 @@ namespace WeaponSystem.Shooting
         public event Action OnReloadStarted;
         public event Action OnReloadFinished;
 
+        // C# only lets the declaring class invoke its own events, so subclasses raise them
+        // through these helpers (e.g. a shotgun notifying once per inserted shell).
+        /// <summary>Notifies listeners that the ammo counter changed. Call after editing ammo.</summary>
+        protected void RaiseAmmoChanged() => OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+
+        /// <summary>Notifies listeners that a reload has started.</summary>
+        protected void RaiseReloadStarted() => OnReloadStarted?.Invoke();
+
+        /// <summary>Notifies listeners that a reload has finished.</summary>
+        protected void RaiseReloadFinished() => OnReloadFinished?.Invoke();
+
         /// <summary>0 at level 1, 1 at max level.</summary>
         protected float LevelT => (level - 1) / (float)(MaxLevel - 1);
 
@@ -120,7 +131,7 @@ namespace WeaponSystem.Shooting
             for (int i = 0; i < ProjectilesPerShot; i++)
                 ShootRay(ApplySpread(AimDirection));
 
-            OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+            RaiseAmmoChanged();
             OnWeaponFired?.Invoke();
             OnWeaponShot();
         }
@@ -181,22 +192,34 @@ namespace WeaponSystem.Shooting
                 return;
 
             _isReloading = true;
-            OnReloadStarted?.Invoke();
+            RaiseReloadStarted();
             StartCoroutine(ReloadRoutine());
         }
 
         /// <summary>
-        /// Default reload: waits <see cref="ReloadTime"/> and refills the whole magazine.
-        /// Shell-fed weapons (shotgun) override this to insert one shell at a time.
+        /// Template for the reload coroutine: <see cref="ReloadSequence"/> fills the magazine,
+        /// then the base clears the reload flag and raises the shared events. Not virtual on
+        /// purpose - subclasses customise the filling step only, so ammo/finished notifications
+        /// can never be forgotten.
         /// </summary>
-        protected virtual IEnumerator ReloadRoutine()
+        private IEnumerator ReloadRoutine()
+        {
+            yield return ReloadSequence();
+
+            _isReloading = false;
+            RaiseAmmoChanged();
+            RaiseReloadFinished();
+        }
+
+        /// <summary>
+        /// Default reload: waits <see cref="ReloadTime"/> and refills the whole magazine.
+        /// Shell-fed weapons (shotgun) override this to insert one shell at a time, calling
+        /// <see cref="RaiseAmmoChanged"/> after every inserted shell.
+        /// </summary>
+        protected virtual IEnumerator ReloadSequence()
         {
             yield return new WaitForSeconds(ReloadTime);
             _currentAmmo = MagazineSize;
-            _isReloading = false;
-
-            OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
-            OnReloadFinished?.Invoke();
         }
 
         /// <summary>Changes the weapon level. Ammo is left untouched.</summary>

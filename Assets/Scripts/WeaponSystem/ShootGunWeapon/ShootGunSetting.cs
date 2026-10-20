@@ -42,19 +42,19 @@ namespace WeaponSystem.ShootGunWeapon
         public float PelletDamage => Damage;
         public float ShellReloadTime => ReloadTime;
 
-        /// <summary>Inserts shells one at a time; each shell costs <see cref="ReloadTime"/> seconds.</summary>
-        protected override IEnumerator ReloadRoutine()
+        /// <summary>
+        /// Inserts shells one at a time; each shell costs <see cref="ReloadTime"/> seconds.
+        /// The base class clears the reload flag and fires OnReloadFinished afterwards.
+        /// </summary>
+        protected override IEnumerator ReloadSequence()
         {
             while (_currentAmmo < MagazineSize)
             {
                 yield return new WaitForSeconds(ReloadTime);
                 _currentAmmo++;
 
-               OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+                RaiseAmmoChanged();
             }
-
-            _isReloading = false;
-            OnReloadFinished?.Invoke();
         }
     }
 }
