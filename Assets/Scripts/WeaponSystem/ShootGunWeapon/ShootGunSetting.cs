@@ -1,4 +1,3 @@
-using System;
 using System.Collections;
 using Combat;
 using UnityEngine;
@@ -11,171 +10,51 @@ namespace WeaponSystem.ShootGunWeapon
     /// launches several pellets from the muzzle (they leave clustered and fan out with
     /// distance). Magazine is fixed at 8 shells; reload inserts one shell at a time.
     /// Level interpolation (level1 -> level5): damage 20 -> 80 (per pellet), spread radius
-    /// 7m -> 1m, shell reload time 2s -> 0.5s. Every pellet draws a yellow ray and damages
-    /// any <see cref="IDamageable"/> it hits. Implements <see cref="IWeapon"/>: input is
-    /// driven from outside (e.g. the ShotingPlayerSystem), this component only handles
-    /// firing and reloading behaviour.
+    /// 7m -> 1m, shell reload time 2s -> 0.5s. All mechanics live in <see cref="WeaponSettings"/>;
+    /// this class only overrides the stats, the pellet count and the shell-by-shell reload.
     /// </summary>
-    public class ShootGunSetting : MonoBehaviour, IWeapon
+    public class ShootGunSetting : WeaponSettings
     {
-        private const int MaxLevel = 5;
-        private const int MagazineCapacity = 8; // always 8 shells
-
-        [Header("Weapon Level")]
-        [SerializeField, Range(1, MaxLevel)] private int level = 1;
-
-        [Header("Level-scaled stats (level1 -> level5)")]
-        [SerializeField] private float damageMin = 20f;   // per pellet
-        [SerializeField] private float damageMax = 80f;   // per pellet
-        [SerializeField] private float spreadRadiusMin = 7f;
-        [SerializeField] private float spreadRadiusMax = 1f;
-        [SerializeField] private float shellReloadTimeMin = 2f;
-        [SerializeField] private float shellReloadTimeMax = 0.5f;
-
         [Header("Shot pattern")]
         [Tooltip("Number of pellets fired per trigger pull.")]
         [SerializeField, Range(1, 20)] private int pelletCount = 8;
-        [SerializeField] private float maxRange = 25f;
 
-        [Header("Shooting")]
-        [Tooltip("Where shots originate. Falls back to this transform if empty.")]
-        [SerializeField] private Transform muzzle;
-        [Tooltip("Layers that block bullets (terrain, enemies, props...).")]
-        [SerializeField] private LayerMask shootMask = ~0;
-        [Tooltip("Seconds between shots.")]
-        [SerializeField] private float fireInterval = 0.8f;
-        [Tooltip("True keeps shooting while the trigger is held; false - one shot per fresh press.")]
-        [SerializeField] private bool fullAuto = false;
-        [SerializeField] private Color rayColor = Color.yellow;
-        [SerializeField] private float rayDebugTime = 0.3f;
+        public override int MinMagazineSize => 8;
+        public override int MaxMagazineSize => 8; // always 8 shells
 
-        private int _currentAmmo;
-        private bool _isReloading;
-        private float _fireCooldown;
+        public override float MinDamage => 20f; // per pellet
+        public override float MaxDamage => 80f; // per pellet
 
-        // Level-interpolated, read-only stats.
-        public int MagazineSize => MagazineCapacity;
-        public int PelletCount => pelletCount;
-        public float PelletDamage => Mathf.Lerp(damageMin, damageMax, LevelT);
-        public float SpreadRadius => Mathf.Lerp(spreadRadiusMin, spreadRadiusMax, LevelT);
-        public float ShellReloadTime => Mathf.Lerp(shellReloadTimeMin, shellReloadTimeMax, LevelT);
+        public override float MinSpreadRadius => 7f;
+        public override float MaxSpreadRadius => 1f;
 
-        public int Level => level;
-        public int CurrentAmmo => _currentAmmo;
-        public bool IsReloading => _isReloading;
-        public bool FullAuto => fullAuto;
+        public override float MinReloadTime => 2f; // per shell
+        public override float MaxReloadTime => 0.5f;
 
-        public bool CanFire => _currentAmmo > 0 && !_isReloading && _fireCooldown <= 0f;
-        public bool CanReload => _currentAmmo < MagazineCapacity && !_isReloading;
+        public override float FireInterval => 0.8f;
+        public override float MaxRange => 25f;
+        public override bool FullAuto => false;
 
-        // Weapon events forwarded to whoever drives this weapon (player system, UI, ...).
-        public event Action<int, int> OnAmmoChanged;
-        public event Action OnWeaponFired;
-        public event Action OnReloadStarted;
-        public event Action OnReloadFinished;
+        public override int ProjectilesPerShot => pelletCount;
 
-        private float LevelT => (level - 1) / (float)(MaxLevel - 1);
+        // Back-compat aliases, kept for anything reading the old property names.
+        public int PelletCount => ProjectilesPerShot;
+        public float PelletDamage => Damage;
+        public float ShellReloadTime => ReloadTime;
 
-        private Vector3 Origin => muzzle != null ? muzzle.position : transform.position;
-        private Vector3 AimDirection => muzzle != null ? muzzle.forward : transform.forward;
-
-        private void Awake()
+        /// <summary>Inserts shells one at a time; each shell costs <see cref="ReloadTime"/> seconds.</summary>
+        protected override IEnumerator ReloadRoutine()
         {
-            _currentAmmo = MagazineCapacity;
-        }
-
-        private void Update()
-        {
-            // The fire cooldown lives in the weapon, so the rate of fire stays the same
-            // no matter who drives it (player shooting system, AI, debug scripts, ...).
-            if (_fireCooldown > 0f)
-                _fireCooldown -= Time.deltaTime;
-        }
-
-        public void Fire()
-        {
-            if (!CanFire)
-                return;
-
-            _currentAmmo--;
-            _fireCooldown = fireInterval;
-
-            // All pellets share the muzzle origin but get an independent random offset,
-            // so the spray is tight near the barrel and widens with distance.
-            for (int i = 0; i < pelletCount; i++)
-                ShootRay(ApplySpread(AimDirection));
-
-            OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
-            OnWeaponFired?.Invoke();
-        }
-
-        private Vector3 ApplySpread(Vector3 aimDir)
-        {
-            float spread = SpreadRadius;
-            if (spread <= 0.0001f)
-                return aimDir;
-
-            Vector3 center = Origin + aimDir * maxRange;
-
-            Vector3 right = Vector3.Cross(aimDir, Vector3.up);
-            if (right.sqrMagnitude < 0.0001f)
-                right = Vector3.Cross(aimDir, transform.right);
-            right.Normalize();
-            Vector3 up = Vector3.Cross(right, aimDir).normalized;
-
-            float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-            float radius = spread * Mathf.Sqrt(UnityEngine.Random.value);
-
-            Vector3 offset = (right * Mathf.Cos(angle) + up * Mathf.Sin(angle)) * radius;
-            return (center + offset - Origin).normalized;
-        }
-
-        private void ShootRay(Vector3 direction)
-        {
-            float distance = maxRange;
-
-            if (Physics.Raycast(Origin, direction, out RaycastHit hit, distance, shootMask,
-                    QueryTriggerInteraction.Ignore))
+            while (_currentAmmo < MagazineSize)
             {
-                distance = hit.distance;
-
-                var target = hit.collider.GetComponentInParent<IDamageable>();
-                if (target != null && !target.IsDead)
-                    target.TakeDamage(PelletDamage);
-            }
-
-            Debug.DrawRay(Origin, direction * distance, rayColor, rayDebugTime);
-        }
-
-        public void StartReload()
-        {
-            if (!CanReload)
-                return;
-
-            _isReloading = true;
-            OnReloadStarted?.Invoke();
-            StartCoroutine(ReloadRoutine());
-        }
-
-        /// <summary>Inserts shells one at a time; each shell costs ShellReloadTime seconds.</summary>
-        private IEnumerator ReloadRoutine()
-        {
-            while (_currentAmmo < MagazineCapacity)
-            {
-                yield return new WaitForSeconds(ShellReloadTime);
+                yield return new WaitForSeconds(ReloadTime);
                 _currentAmmo++;
 
-                OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+               OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
             }
 
             _isReloading = false;
             OnReloadFinished?.Invoke();
-        }
-
-        /// <summary>Changes the weapon level.</summary>
-        public void SetLevel(int newLevel)
-        {
-            level = Mathf.Clamp(newLevel, 1, MaxLevel);
         }
     }
 }
