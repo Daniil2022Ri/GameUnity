@@ -1,4 +1,5 @@
 using System;
+using Combat;
 using UnityEngine;
 
 namespace SettingsPlayer.PlayerSettings
@@ -8,7 +9,7 @@ namespace SettingsPlayer.PlayerSettings
     /// Handles taking damage (with armor mitigation), sprint stamina drain/regen
     /// and level-based stat growth.
     /// </summary>
-    public class PlayerSetting : MonoBehaviour
+    public class PlayerSetting : MonoBehaviour, IDamageable
     {
         [Header("Level")]
         [SerializeField] private int lvlPlayer = 1;
@@ -16,9 +17,9 @@ namespace SettingsPlayer.PlayerSettings
         [SerializeField] private float statBonusPerLevel = 0.015f;
 
         [Header("Base stats (reserve at level 1)")]
-        [SerializeField][Range(0f,1000f)] private float heal = 100f;
-        [SerializeField][Range(0f,1000f)] private float stamina = 100f;
-        [SerializeField][Range(0f,300f)] private float armor = 100f;
+        [SerializeField, Range(0f, 1000f)] private float heal = 100f;
+        [SerializeField, Range(0f, 1000f)] private float stamina = 100f;
+        [SerializeField, Range(0f, 300f)] private float armor = 100f;
 
         [Header("Damage distribution")]
         [Tooltip("Share of incoming damage absorbed by armor while it still has value.")]
@@ -92,7 +93,6 @@ namespace SettingsPlayer.PlayerSettings
         private void Update()
         {
             UpdateStamina();
-            
         }
 
         /// <summary>

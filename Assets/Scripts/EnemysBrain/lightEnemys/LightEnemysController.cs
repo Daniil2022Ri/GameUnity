@@ -1,13 +1,13 @@
-using SettingsPlayer.PlayerSettings;
+using Combat;
 using UnityEngine;
 
 namespace EnemysBrain.lightEnemys
 {
     /// <summary>
     /// Drives a "light" enemy: chases the player and attacks when within attack range.
-    /// Kept allocation-free and cache-based: the player transform and its PlayerSetting
-    /// are resolved once (retried on a timer only while missing), and all combat values
-    /// come from <see cref="EnemyLightSettings"/>.
+    /// Kept allocation-free and cache-based: the player transform and its damageable
+    /// target are resolved once (retried on a timer only while missing), and all combat
+    /// values come from <see cref="EnemyLightSettings"/>.
     /// </summary>
     [RequireComponent(typeof(EnemyLightSettings))]
     public class LightEnemysController : MonoBehaviour
@@ -24,7 +24,7 @@ namespace EnemysBrain.lightEnemys
         [SerializeField] private float targetAcquireRetryTime = 0.5f;
 
         private EnemyLightSettings _stats;
-        private PlayerSetting _playerSettings;
+        private IDamageable _target;
         private float _attackTimer;
         private float _acquireTimer;
 
@@ -43,12 +43,17 @@ namespace EnemysBrain.lightEnemys
             if (_stats.IsDead)
                 return;
 
-            if (player == null)
+            if (_target == null)
             {
                 // Throttle the search so we don't scan the scene every frame.
                 _acquireTimer -= Time.deltaTime;
                 if (_acquireTimer > 0f || !TryAcquireTarget())
                     return;
+            }
+            else if (_target.IsDead)
+            {
+                // No point chasing a corpse; wait for a new target.
+                return;
             }
 
             // Flat (ground-plane) vector toward the player.
@@ -77,14 +82,14 @@ namespace EnemysBrain.lightEnemys
 
         private void TryAttack()
         {
-            if (_playerSettings == null || _playerSettings.IsDead)
+            if (_target == null || _target.IsDead)
                 return;
 
             _attackTimer -= Time.deltaTime;
             if (_attackTimer > 0f)
                 return;
 
-            _playerSettings.TakeDamage(_stats.AttackDamage);
+            _target.TakeDamage(_stats.AttackDamage);
             _attackTimer = _stats.AttackInterval;
         }
 
@@ -95,7 +100,7 @@ namespace EnemysBrain.lightEnemys
                 rotationSpeed * Time.deltaTime);
         }
 
-        /// <summary>Resolves the player transform and its PlayerSetting, caching both.</summary>
+        /// <summary>Resolves the player transform and its damageable target, caching both.</summary>
         private bool TryAcquireTarget()
         {
             _acquireTimer = targetAcquireRetryTime;
@@ -109,13 +114,9 @@ namespace EnemysBrain.lightEnemys
                 player = found.transform;
             }
 
-            if (_playerSettings == null)
-            {
-                _playerSettings = player.GetComponent<PlayerSetting>()
-                    ?? player.GetComponentInChildren<PlayerSetting>();
-            }
+            _target ??= player.GetComponentInChildren<IDamageable>();
 
-            return _playerSettings != null;
+            return _target != null;
         }
     }
 }

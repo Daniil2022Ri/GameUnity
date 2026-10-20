@@ -1,5 +1,7 @@
-using EnemysBrain.lightEnemys;
+using Combat;
+using System;
 using UnityEngine;
+using WeaponSystem.Shooting;
 
 namespace WeaponSystem.PistolWeapon
 {
@@ -7,9 +9,11 @@ namespace WeaponSystem.PistolWeapon
     /// Pistol weapon: characteristics scale with weapon level (1..5) and shooting is
     /// raycast based. Stats interpolate linearly from a level-1 value to a level-5 value:
     /// magazine 8 -> 30, damage 10 -> 50, spread radius 7m -> 0m, reload 3s -> 0.5s.
-    /// Every shot draws a yellow ray (Debug) and damages any <see cref="EnemyLightSettings"/> hit.
+    /// Every shot draws a yellow ray (Debug) and damages any <see cref="IDamageable"/> hit.
+    /// Implements <see cref="IWeapon"/>: input is driven from outside (e.g. the
+    /// ShotingPlayerSystem), this component only handles firing and reloading behaviour.
     /// </summary>
-    public class PistolSettings : MonoBehaviour
+    public class PistolSettings : MonoBehaviour, IWeapon
     {
         private const int MaxLevel = 5;
 
@@ -35,7 +39,6 @@ namespace WeaponSystem.PistolWeapon
         [Tooltip("Seconds between shots when holding the fire button.")]
         [SerializeField] private float fireInterval = 0.2f;
         [SerializeField] private bool fullAuto = false;
-        [SerializeField] private KeyCode reloadKey = KeyCode.R;
         [SerializeField] private Color rayColor = Color.yellow;
         [SerializeField] private float rayDebugTime = 0.3f;
 
@@ -52,8 +55,18 @@ namespace WeaponSystem.PistolWeapon
         public int Level => level;
         public int CurrentAmmo => _currentAmmo;
         public bool IsReloading => _isReloading;
+        public bool FullAuto => fullAuto;
 
-        private float LevelT => MaxLevel > 1 ? (level - 1) / (float)(MaxLevel - 1) : 0f;
+        public bool CanFire => _currentAmmo > 0 && !_isReloading && _fireCooldown <= 0f;
+        public bool CanReload => _currentAmmo < MagazineSize && !_isReloading;
+
+        // Weapon events forwarded to whoever drives this weapon (player system, UI, ...).
+        public event Action<int, int> OnAmmoChanged;
+        public event Action OnWeaponFired;
+        public event Action OnReloadStarted;
+        public event Action OnReloadFinished;
+
+        private float LevelT => (level - 1) / (float)(MaxLevel - 1);
 
         private Vector3 Origin => muzzle != null ? muzzle.position : transform.position;
         private Vector3 AimDirection => muzzle != null ? muzzle.forward : transform.forward;
@@ -65,42 +78,25 @@ namespace WeaponSystem.PistolWeapon
 
         private void Update()
         {
-            HandleInput();
-
+            // The fire cooldown lives in the weapon, so the rate of fire stays the same
+            // no matter who drives it (player shooting system, AI, debug scripts, ...).
             if (_fireCooldown > 0f)
                 _fireCooldown -= Time.deltaTime;
         }
 
-        private void HandleInput()
-        {
-            bool firing = fullAuto ? Input.GetMouseButton(0) : Input.GetMouseButtonDown(0);
-
-            if (firing && !_isReloading && _fireCooldown <= 0f)
-            {
-                if (_currentAmmo > 0)
-                {
-                    Fire();
-                    _fireCooldown = fireInterval;
-                }
-                else
-                {
-                    StartReload();
-                }
-            }
-
-            if (Input.GetKeyDown(reloadKey))
-                StartReload();
-        }
-
         public void Fire()
         {
-            if (_isReloading || _currentAmmo <= 0)
+            if (!CanFire)
                 return;
 
             _currentAmmo--;
+            _fireCooldown = fireInterval;
 
             Vector3 direction = ApplySpread(AimDirection);
             ShootRay(direction);
+
+            OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+            OnWeaponFired?.Invoke();
         }
 
         /// <summary>
@@ -123,8 +119,8 @@ namespace WeaponSystem.PistolWeapon
             right.Normalize();
             Vector3 up = Vector3.Cross(right, aimDir).normalized;
 
-            float angle = Random.Range(0f, Mathf.PI * 2f);
-            float radius = spread * Mathf.Sqrt(Random.value); // sqrt keeps the disc uniform
+            float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            float radius = spread * Mathf.Sqrt(UnityEngine.Random.value); // sqrt keeps the disc uniform
 
             Vector3 offset = (right * Mathf.Cos(angle) + up * Mathf.Sin(angle)) * radius;
             return (center + offset - Origin).normalized;
@@ -139,21 +135,22 @@ namespace WeaponSystem.PistolWeapon
             {
                 distance = hit.distance;
 
-                var enemy = hit.collider.GetComponentInParent<EnemyLightSettings>();
-                if (enemy != null && !enemy.IsDead)
-                    enemy.TakeDamage(Damage);
+                var target = hit.collider.GetComponentInParent<IDamageable>();
+                if (target != null && !target.IsDead)
+                    target.TakeDamage(Damage);
             }
 
             // Yellow aim line for feedback.
             Debug.DrawRay(Origin, direction * distance, rayColor, rayDebugTime);
         }
 
-        private void StartReload()
+        public void StartReload()
         {
-            if (_isReloading || _currentAmmo == MagazineSize)
+            if (!CanReload)
                 return;
 
             _isReloading = true;
+            OnReloadStarted?.Invoke();
             StartCoroutine(ReloadRoutine());
         }
 
@@ -162,6 +159,9 @@ namespace WeaponSystem.PistolWeapon
             yield return new WaitForSeconds(ReloadTime);
             _currentAmmo = MagazineSize;
             _isReloading = false;
+
+            OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+            OnReloadFinished?.Invoke();
         }
 
         /// <summary>Changes the weapon level and tops the magazine up to the new size.</summary>

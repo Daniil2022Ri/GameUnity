@@ -1,6 +1,8 @@
-using EnemysBrain.lightEnemys;
+using System;
 using System.Collections;
+using Combat;
 using UnityEngine;
+using WeaponSystem.Shooting;
 
 namespace WeaponSystem.ShootGunWeapon
 {
@@ -10,9 +12,11 @@ namespace WeaponSystem.ShootGunWeapon
     /// distance). Magazine is fixed at 8 shells; reload inserts one shell at a time.
     /// Level interpolation (level1 -> level5): damage 20 -> 80 (per pellet), spread radius
     /// 7m -> 1m, shell reload time 2s -> 0.5s. Every pellet draws a yellow ray and damages
-    /// any <see cref="EnemyLightSettings"/> it hits.
+    /// any <see cref="IDamageable"/> it hits. Implements <see cref="IWeapon"/>: input is
+    /// driven from outside (e.g. the ShotingPlayerSystem), this component only handles
+    /// firing and reloading behaviour.
     /// </summary>
-    public class ShootGunSetting : MonoBehaviour
+    public class ShootGunSetting : MonoBehaviour, IWeapon
     {
         private const int MaxLevel = 5;
         private const int MagazineCapacity = 8; // always 8 shells
@@ -40,7 +44,8 @@ namespace WeaponSystem.ShootGunWeapon
         [SerializeField] private LayerMask shootMask = ~0;
         [Tooltip("Seconds between shots.")]
         [SerializeField] private float fireInterval = 0.8f;
-        [SerializeField] private KeyCode reloadKey = KeyCode.R;
+        [Tooltip("True keeps shooting while the trigger is held; false - one shot per fresh press.")]
+        [SerializeField] private bool fullAuto = false;
         [SerializeField] private Color rayColor = Color.yellow;
         [SerializeField] private float rayDebugTime = 0.3f;
 
@@ -58,8 +63,18 @@ namespace WeaponSystem.ShootGunWeapon
         public int Level => level;
         public int CurrentAmmo => _currentAmmo;
         public bool IsReloading => _isReloading;
+        public bool FullAuto => fullAuto;
 
-        private float LevelT => MaxLevel > 1 ? (level - 1) / (float)(MaxLevel - 1) : 0f;
+        public bool CanFire => _currentAmmo > 0 && !_isReloading && _fireCooldown <= 0f;
+        public bool CanReload => _currentAmmo < MagazineCapacity && !_isReloading;
+
+        // Weapon events forwarded to whoever drives this weapon (player system, UI, ...).
+        public event Action<int, int> OnAmmoChanged;
+        public event Action OnWeaponFired;
+        public event Action OnReloadStarted;
+        public event Action OnReloadFinished;
+
+        private float LevelT => (level - 1) / (float)(MaxLevel - 1);
 
         private Vector3 Origin => muzzle != null ? muzzle.position : transform.position;
         private Vector3 AimDirection => muzzle != null ? muzzle.forward : transform.forward;
@@ -71,42 +86,27 @@ namespace WeaponSystem.ShootGunWeapon
 
         private void Update()
         {
-            HandleInput();
-
+            // The fire cooldown lives in the weapon, so the rate of fire stays the same
+            // no matter who drives it (player shooting system, AI, debug scripts, ...).
             if (_fireCooldown > 0f)
                 _fireCooldown -= Time.deltaTime;
         }
 
-        private void HandleInput()
-        {
-            if (Input.GetMouseButtonDown(0) && !_isReloading && _fireCooldown <= 0f)
-            {
-                if (_currentAmmo > 0)
-                {
-                    Fire();
-                    _fireCooldown = fireInterval;
-                }
-                else
-                {
-                    StartReload();
-                }
-            }
-
-            if (Input.GetKeyDown(reloadKey))
-                StartReload();
-        }
-
         public void Fire()
         {
-            if (_isReloading || _currentAmmo <= 0)
+            if (!CanFire)
                 return;
 
             _currentAmmo--;
+            _fireCooldown = fireInterval;
 
             // All pellets share the muzzle origin but get an independent random offset,
             // so the spray is tight near the barrel and widens with distance.
             for (int i = 0; i < pelletCount; i++)
                 ShootRay(ApplySpread(AimDirection));
+
+            OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
+            OnWeaponFired?.Invoke();
         }
 
         private Vector3 ApplySpread(Vector3 aimDir)
@@ -123,8 +123,8 @@ namespace WeaponSystem.ShootGunWeapon
             right.Normalize();
             Vector3 up = Vector3.Cross(right, aimDir).normalized;
 
-            float angle = Random.Range(0f, Mathf.PI * 2f);
-            float radius = spread * Mathf.Sqrt(Random.value);
+            float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            float radius = spread * Mathf.Sqrt(UnityEngine.Random.value);
 
             Vector3 offset = (right * Mathf.Cos(angle) + up * Mathf.Sin(angle)) * radius;
             return (center + offset - Origin).normalized;
@@ -139,20 +139,21 @@ namespace WeaponSystem.ShootGunWeapon
             {
                 distance = hit.distance;
 
-                var enemy = hit.collider.GetComponentInParent<EnemyLightSettings>();
-                if (enemy != null && !enemy.IsDead)
-                    enemy.TakeDamage(PelletDamage);
+                var target = hit.collider.GetComponentInParent<IDamageable>();
+                if (target != null && !target.IsDead)
+                    target.TakeDamage(PelletDamage);
             }
 
             Debug.DrawRay(Origin, direction * distance, rayColor, rayDebugTime);
         }
 
-        private void StartReload()
+        public void StartReload()
         {
-            if (_isReloading || _currentAmmo == MagazineCapacity)
+            if (!CanReload)
                 return;
 
             _isReloading = true;
+            OnReloadStarted?.Invoke();
             StartCoroutine(ReloadRoutine());
         }
 
@@ -163,9 +164,12 @@ namespace WeaponSystem.ShootGunWeapon
             {
                 yield return new WaitForSeconds(ShellReloadTime);
                 _currentAmmo++;
+
+                OnAmmoChanged?.Invoke(_currentAmmo, MagazineSize);
             }
 
             _isReloading = false;
+            OnReloadFinished?.Invoke();
         }
 
         /// <summary>Changes the weapon level.</summary>

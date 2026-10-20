@@ -1,4 +1,5 @@
 using System;
+using Combat;
 using UnityEngine;
 
 namespace EnemysBrain.lightEnemys
@@ -8,7 +9,7 @@ namespace EnemysBrain.lightEnemys
     /// enemy level: each level above 1 boosts every stat by a fixed percent of its
     /// base value. Exposes the damage this enemy deals to the player.
     /// </summary>
-    public class EnemyLightSettings : MonoBehaviour
+    public class EnemyLightSettings : MonoBehaviour, IDamageable
     {
         [Header("Level")]
         [SerializeField, Range(1, 25)] private int lvlEnemyLight = 1;
