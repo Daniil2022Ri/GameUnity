@@ -36,6 +36,15 @@ namespace Controller.MoveControllers
         public bool IsGrounded => _isGrounded;
         public bool IsSprinting { get; private set; }
 
+        // Movement data mirrored by other systems (animator, VFX, audio...).
+        public bool IsMoving { get; private set; }
+        /// <summary>Raw input axes: x = right, y = forward (world space).</summary>
+        public Vector2 MoveInput { get; private set; }
+        /// <summary>Horizontal speed in m/s the character is currently moving at.</summary>
+        public float CurrentSpeed { get; private set; }
+        /// <summary>Fastest horizontal speed this controller can reach (sprinting).</summary>
+        public float MaxSpeed => Mathf.Max(walkSpeed, sprintSpeed);
+
         private void Awake()
         {
             _controller = GetComponent<CharacterController>();
@@ -79,6 +88,10 @@ namespace Controller.MoveControllers
             IsSprinting = wantsSprint && isMoving && canSprint;
 
             float speed = IsSprinting ? sprintSpeed : walkSpeed;
+
+            IsMoving = isMoving;
+            MoveInput = new Vector2(x, z);
+            CurrentSpeed = isMoving ? speed : 0f;
 
             _velocity = new Vector3(x, 0f, z) * speed;
 
