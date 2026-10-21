@@ -1,5 +1,6 @@
 namespace Controller.MoveControllers
 {
+    using UI.Settings;
     using UnityEngine;
 
     /// <summary>
@@ -33,6 +34,9 @@ namespace Controller.MoveControllers
         [SerializeField] private float lookPointLookAheadWeight = 1f;
         [Tooltip("Higher = the look-ahead reacts faster to the cursor.")]
         [SerializeField] private float lookAheadLerp = 6f;
+        [Tooltip("Scale the look-ahead response with GameSettings.MouseSensitivity " +
+                 "(1 = neutral, so nothing changes until the player moves the slider).")]
+        [SerializeField] private bool useSettingsSensitivity = true;
 
         private Camera _camera;
         private Vector3 _currentLookAhead;
@@ -63,9 +67,11 @@ namespace Controller.MoveControllers
 
             Vector3 desiredLookAhead = ComputeCursorLookAhead();
 
-            // Frame-rate independent smoothing of the look-ahead vector.
+            // Frame-rate independent smoothing of the look-ahead vector. The settings slider
+            // scales the response, so a higher mouse sensitivity pans the view faster.
+            float lookSpeed = lookAheadLerp * SensitivityMultiplier;
             _currentLookAhead = Vector3.Lerp(_currentLookAhead, desiredLookAhead,
-                1f - Mathf.Exp(-lookAheadLerp * Time.deltaTime));
+                1f - Mathf.Exp(-lookSpeed * Time.deltaTime));
 
             Vector3 baseOffset = followTargetRotation
                 ? Quaternion.Euler(0f, target.eulerAngles.y, 0f) * offset
@@ -85,6 +91,10 @@ namespace Controller.MoveControllers
 
             transform.LookAt(_smoothedLookPoint + Vector3.up * 0.5f);
         }
+
+        /// <summary>Mouse sensitivity from the settings menu (1 when settings are not loaded).</summary>
+        private float SensitivityMultiplier =>
+            useSettingsSensitivity && GameSettings.Exists ? GameSettings.Instance.MouseSensitivity : 1f;
 
         /// <summary>
         /// Projects the cursor onto a flat ground plane at the target's height and

@@ -1,4 +1,5 @@
 using System;
+using UI.Settings;
 using UnityEngine;
 using WeaponSystem.Shooting;
 
@@ -23,6 +24,8 @@ namespace PlayerAttakingSystem.ShotingPlayerSystem
         [Tooltip("Fire button. Full-auto weapons shoot while it is held, semi-auto on a fresh press.")]
         [SerializeField] private KeyCode fireKey = KeyCode.Mouse0;
         [SerializeField] private KeyCode reloadKey = KeyCode.R;
+        [Tooltip("Read fire/reload through KeyBindingManager so the settings menu can rebind them.")]
+        [SerializeField] private bool useRebindableKeys;
         [Tooltip("Start reloading automatically when the fire button is used on an empty magazine.")]
         [SerializeField] private bool autoReloadOnEmpty = true;
 
@@ -78,10 +81,10 @@ namespace PlayerAttakingSystem.ShotingPlayerSystem
             if (_weapon.FullAuto)
             {
                 // Fire every frame while held; the weapon's own cooldown throttles the fire rate.
-                if (Input.GetKey(fireKey))
+                if (IsFireHeld())
                     AttemptFire();
             }
-            else if (Input.GetKeyDown(fireKey))
+            else if (IsFirePressed())
             {
                 AttemptFire();
             }
@@ -89,9 +92,22 @@ namespace PlayerAttakingSystem.ShotingPlayerSystem
 
         private void HandleReloadInput()
         {
-            if (Input.GetKeyDown(reloadKey))
+            if (IsReloadPressed())
                 _weapon.StartReload(); // the weapon itself guards CanReload
         }
+
+        /// <summary>Fire button: rebindable action when enabled, inspector KeyCode otherwise.</summary>
+        private bool IsFireHeld() => useRebindableKeys
+            ? KeyBindingManager.Instance.IsPressed(GameAction.Fire)
+            : Input.GetKey(fireKey);
+
+        private bool IsFirePressed() => useRebindableKeys
+            ? KeyBindingManager.Instance.IsDown(GameAction.Fire)
+            : Input.GetKeyDown(fireKey);
+
+        private bool IsReloadPressed() => useRebindableKeys
+            ? KeyBindingManager.Instance.IsDown(GameAction.Reload)
+            : Input.GetKeyDown(reloadKey);
 
         private void AttemptFire()
         {

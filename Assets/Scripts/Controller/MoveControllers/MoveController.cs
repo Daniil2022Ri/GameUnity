@@ -1,4 +1,5 @@
 using SettingsPlayer.PlayerSettings;
+using UI.Settings;
 using UnityEngine;
 
 namespace Controller.MoveControllers
@@ -10,6 +11,11 @@ namespace Controller.MoveControllers
         [SerializeField] private float walkSpeed = 3.5f;
         [SerializeField] private float sprintSpeed = 6.5f;
         [SerializeField] private KeyCode sprintKey = KeyCode.LeftShift;
+
+        [Header("Input (rebindable keys)")]
+        [Tooltip("Read movement through KeyBindingManager so the settings menu can rebind it. " +
+                 "When off, the legacy Horizontal/Vertical axes are used (gamepads, arrow keys).")]
+        [SerializeField] private bool useRebindableKeys;
 
         [Header("Gravity / Ground Check")]
         [SerializeField] private float gravity = -20f;
@@ -77,10 +83,9 @@ namespace Controller.MoveControllers
 
         private void Move()
         {
-            float x = Input.GetAxisRaw("Horizontal");
-            float z = Input.GetAxisRaw("Vertical");
+            ReadMoveAxes(out float x, out float z);
 
-            bool wantsSprint = Input.GetKey(sprintKey);
+            bool wantsSprint = IsSprintHeld();
             bool isMoving = !Mathf.Approximately(x, 0f) || !Mathf.Approximately(z, 0f);
 
             // Only sprint if there is a link to the player stats, or if sprinting is allowed.
@@ -110,6 +115,31 @@ namespace Controller.MoveControllers
             _velocity *= Time.deltaTime;
             _controller.Move(_velocity);
         }
+
+        /// <summary>
+        /// Movement axes from either the legacy Input Manager (gamepads, arrow keys) or the
+        /// rebindable keys configured in the settings menu.
+        /// </summary>
+        private void ReadMoveAxes(out float x, out float z)
+        {
+            if (!useRebindableKeys)
+            {
+                x = Input.GetAxisRaw("Horizontal");
+                z = Input.GetAxisRaw("Vertical");
+                return;
+            }
+
+            KeyBindingManager keys = KeyBindingManager.Instance;
+
+            x = (keys.IsPressed(GameAction.MoveRight) ? 1f : 0f)
+                - (keys.IsPressed(GameAction.MoveLeft) ? 1f : 0f);
+            z = (keys.IsPressed(GameAction.MoveForward) ? 1f : 0f)
+                - (keys.IsPressed(GameAction.MoveBackward) ? 1f : 0f);
+        }
+
+        private bool IsSprintHeld() => useRebindableKeys
+            ? KeyBindingManager.Instance.IsPressed(GameAction.Sprint)
+            : Input.GetKey(sprintKey);
 
         /// <summary>
         /// RTS-style aim: casts a ray from the camera through the cursor onto a flat
